@@ -1,0 +1,7 @@
+pandas
+seaborn
+scikit-learn
+numpy
+statsmodels
+openpyxl
+matplotlib
