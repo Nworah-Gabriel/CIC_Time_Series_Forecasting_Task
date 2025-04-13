@@ -6,7 +6,7 @@ from statsmodels.tsa.seasonal import seasonal_decompose
 from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
 from statsmodels.tsa.statespace.sarimax import SARIMAX
 from sklearn.metrics import mean_absolute_error, mean_squared_error
-from datetime import timedelta
+from datetime import timedelta, datetime
 
 # Set random seed for reproducibility
 np.random.seed(42)
@@ -181,6 +181,88 @@ def make_forecasts(df_weekly, model_fit, order, seasonal_order):
     
     return forecast_df
 
+
+def make_daily_forecast(df_weekly, model_fit, order, seasonal_order):
+    """Generate daily forecasts for the next 20 working days in April 2025, excluding weekends and Easter holidays"""
+    print("\n=== Working Days Forecast (April 2025) ===")
+    
+    # Define the specific working days (excluding weekends and Easter holidays)
+    working_days = [
+        '2025-04-01', '2025-04-02', '2025-04-03', '2025-04-04',
+        '2025-04-07', '2025-04-08', '2025-04-09', '2025-04-10', '2025-04-11',
+        '2025-04-14', '2025-04-15', '2025-04-16', '2025-04-17',
+        # Skip Good Friday (2025-04-18) and Easter Monday (2025-04-21)
+        '2025-04-22', '2025-04-23', '2025-04-24', '2025-04-25',
+        '2025-04-28', '2025-04-29', '2025-04-30'
+    ]
+    
+    forecast_dates = pd.to_datetime(working_days)
+    
+    # Fit final model on all data
+    final_model = SARIMAX(df_weekly['CIC'],
+                        order=order,
+                        seasonal_order=seasonal_order,
+                        enforce_stationarity=False,
+                        enforce_invertibility=False)
+    
+    final_model_fit = final_model.fit(disp=False)
+    
+    # Generate forecast (we'll forecast enough weeks to cover our period)
+    weeks_needed = 6  # Enough to cover April with buffer
+    forecast = final_model_fit.get_forecast(steps=weeks_needed)
+    
+    # Create weekly forecast dataframe
+    weekly_forecast_dates = pd.date_range(
+        start=df_weekly.index[-1] + timedelta(weeks=1),
+        periods=weeks_needed,
+        freq='W'
+    )
+    
+    weekly_forecast_df = pd.DataFrame({
+        'Forecast': forecast.predicted_mean,
+        'Lower_CI': forecast.conf_int().iloc[:, 0],
+        'Upper_CI': forecast.conf_int().iloc[:, 1]
+    }, index=weekly_forecast_dates)
+    
+    # Create complete daily index for the forecast period
+    start_date = weekly_forecast_df.index[0]
+    end_date = weekly_forecast_df.index[-1] + timedelta(days=6)  # Cover full final week
+    full_daily_index = pd.date_range(start=start_date, end=end_date, freq='D')
+    
+    # Reindex weekly data to daily and interpolate
+    daily_forecast_all = weekly_forecast_df.reindex(full_daily_index)
+    daily_forecast_all = daily_forecast_all.interpolate(method='linear')
+    
+    # Filter for our specific working days
+    daily_forecast_df = daily_forecast_all.loc[daily_forecast_all.index.intersection(forecast_dates)]
+    
+    # Plot forecast
+    plt.figure(figsize=(14, 6))
+    df_weekly['CIC'].plot(label='Historical Weekly Data', color='navy', alpha=0.7)
+    daily_forecast_df['Forecast'].plot(label='Working Day Forecast', color='crimson', marker='o', linestyle='')
+    plt.fill_between(daily_forecast_df.index,
+                    daily_forecast_df['Lower_CI'],
+                    daily_forecast_df['Upper_CI'],
+                    color='pink', alpha=0.3)
+    
+    # Highlight holidays
+    plt.axvspan(pd.to_datetime('2025-04-18'), pd.to_datetime('2025-04-21'), 
+               color='lightgray', alpha=0.5, label='Easter Holidays')
+    
+    plt.title('20 Working Days Forecast (April 2025)\nExcluding Weekends and Easter Holidays')
+    plt.ylabel('Billions of Pesos')
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig('20_Working_Days_Forecast_April_2025.png')
+    
+    print("\n=== Working Days Forecast Results ===")
+    print(daily_forecast_df)
+    
+    return daily_forecast_df
+
+
+
 def main():
     """Main execution function"""
     try:
@@ -196,6 +278,9 @@ def main():
         
         # Make forecasts
         forecast_df = make_forecasts(df_weekly, model_fit, order, seasonal_order)
+        
+        # Make daily forecasts
+        daily_forecast_df = make_daily_forecast(df_weekly, model_fit, order, seasonal_order)
         
         print("\nAnalysis completed successfully!")
         
